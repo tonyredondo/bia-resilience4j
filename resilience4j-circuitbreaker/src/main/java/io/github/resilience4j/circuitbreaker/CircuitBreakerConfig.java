@@ -247,7 +247,7 @@ public class CircuitBreakerConfig implements Serializable {
 
     @Override
     public String toString() {
-        return "CircuitBreakerConfig {" +
+        return "CircuitBreakerConfig{" +
             "recordExceptionPredicate=" + recordExceptionPredicate +
             ", ignoreExceptionPredicate=" + ignoreExceptionPredicate +
             ", recordExceptions=" + Arrays.toString(recordExceptions) +
