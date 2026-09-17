@@ -24,11 +24,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.awaitility.Awaitility.await;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.mock;
@@ -66,7 +69,7 @@ class ThreadPoolBulkheadEventPublisherTest {
     }
 
     @Test
-    void shouldConsumeOnCallRejectedEvent() {
+    void shouldConsumeOnCallRejectedEvent() throws Exception {
         ThreadPoolBulkhead bulkhead = ThreadPoolBulkhead
             .of("test", ThreadPoolBulkheadConfig.custom()
                 .maxThreadPoolSize(1)
@@ -76,38 +79,31 @@ class ThreadPoolBulkheadEventPublisherTest {
         given(helloWorldService.returnHelloWorld()).willReturn("Hello world");
         bulkhead.getEventPublisher().onCallRejected(
             event -> logger.info(event.getEventType().toString()));
-        final Exception exception = new Exception();
+        CountDownLatch running = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
 
-        new Thread(() -> {
-            try {
-                bulkhead.executeRunnable(() -> {
-                    final AtomicInteger counter = new AtomicInteger(0);
-                    await().atMost(200, TimeUnit.MILLISECONDS).untilAsserted(() -> assertThat(counter.incrementAndGet()).isGreaterThanOrEqualTo(2));
-                });
-            } catch (Exception e) {
-                exception.initCause(e);
-            }
+        try {
+            CompletionStage<String> first = bulkhead.executeCallable(() -> {
+                running.countDown();
+                if (!release.await(5, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("First call was not released");
+                }
+                return "first";
+            });
+            assertThat(running.await(5, TimeUnit.SECONDS)).isTrue();
+            CompletionStage<String> queued = bulkhead.executeCallable(helloWorldService::returnHelloWorld);
 
-        }).start();
-        new Thread(() -> {
-            try {
-                bulkhead.executeCallable(helloWorldService::returnHelloWorld);
-            } catch (Exception e) {
-                exception.initCause(e);
-            }
-        }).start();
-        new Thread(() -> {
-            try {
-                bulkhead.executeCallable(helloWorldService::returnHelloWorld);
-            } catch (Exception e) {
-                exception.initCause(e);
-            }
-        }).start();
+            assertThatThrownBy(() -> bulkhead.executeCallable(helloWorldService::returnHelloWorld))
+                .isInstanceOf(BulkheadFullException.class);
+            then(logger).should(times(1)).info("CALL_REJECTED");
 
-        final AtomicInteger counter = new AtomicInteger(0);
-        await().atMost(500, TimeUnit.MILLISECONDS).until(() -> counter.incrementAndGet() >= 2);
-        assertThat(exception).hasCauseInstanceOf(BulkheadFullException.class);
-        then(logger).should(times(1)).info("CALL_REJECTED");
+            release.countDown();
+            assertThat(first.toCompletableFuture().get(5, TimeUnit.SECONDS)).isEqualTo("first");
+            assertThat(queued.toCompletableFuture().get(5, TimeUnit.SECONDS)).isEqualTo("Hello world");
+        } finally {
+            release.countDown();
+            bulkhead.close();
+        }
     }
 
     @Test
