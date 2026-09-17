@@ -9,7 +9,7 @@ import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
@@ -24,7 +24,7 @@ import java.util.function.UnaryOperator;
  */
 public class ReactorOperatorFallbackDecorator<T> implements UnaryOperator<Publisher<T>> {
 
-    private final Map<Class<? extends Throwable>, Publisher<T>> FALLBACK_PUBLISHER_CACHE = new HashMap<>();
+    private final Map<Class<? extends Throwable>, Publisher<T>> FALLBACK_PUBLISHER_CACHE = new LinkedHashMap<>();
 
     private ReactorOperatorFallbackDecorator(Class<? extends Throwable> throwableType, Publisher<T> fallback) {
         FALLBACK_PUBLISHER_CACHE.put(throwableType, fallback);
